@@ -1,198 +1,126 @@
-# SERP Hawk CRM V2
+# SerpHawk CRM — AWS Deployment
 
-AI-Powered CRM for SEO Agencies | Next.js + FastAPI + PostgreSQL + OpenAI
+A CRM application deployed on AWS as part of the SERP Hawk DevOps Engineer technical assessment.
 
-## Overview
+**Live application:** http://3.104.132.154:3000
+**Login:** `admin@example.com` / `password123`
 
-SERP Hawk CRM V2 is a comprehensive customer relationship management system designed specifically for SEO agencies and digital marketing firms. It manages the entire client lifecycle from cold outreach to project delivery, billing, and SEO monitoring.
+---
 
-### Key Features
 
-- **Role-Based Access**: Admin, Employee, Intern, Client roles with appropriate permissions
-- **AI Email Agent**: Automated company research and personalized email generation
-- **Real-Time Messaging**: WebSocket-based chat system
-- **Service Management**: Catalog, quotes, invoicing, and billing
-- **SEO Tools**: Keyword rankings, competitor analysis, SEO audits
-- **Document Management**: File uploads, OCR for business cards
-- **Reporting**: PDF exports, monitoring dashboards
+Tech Stack
 
-## Tech Stack
+- **Frontend:** Next.js 16 / React 19 / TypeScript, containerized with Docker
+- **Backend:** Python / FastAPI, containerized with Docker
+- **Database:** PostgreSQL hosted on AWS RDS (`db.t4g.micro`)
+- **Hosting:** AWS EC2, Ubuntu 22.04 (`t3.small`)
+- **EBS:20 GB
+- **Containerization:** Docker & Docker Compose
+- **Monitoring:** Amazon CloudWatch
 
-- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Framer Motion
-- **Backend**: FastAPI (Python 3.13), SQLModel ORM, Uvicorn with WebSocket
-- **Database**: PostgreSQL (Neon Serverless)
-- **AI**: OpenAI GPT-4o-mini, Google Gemini (OCR)
-- **Integrations**: Outlook SMTP/IMAP, Webhooks, ReportLab PDFs
 
-## Deployment Guide
+## Architecture
+
+Internet → EC2 (t3.small) running two Docker containers:
+- Next.js frontend (port 3000)
+- FastAPI backend (port 8000)
+
+EC2 connects to Amazon RDS (PostgreSQL, db.t4g.micro, Free Tier). CloudWatch automatically monitors both EC2 and RDS. Security Group on EC2 allows ports 22 (SSH, restricted), 3000, and 8000. See `aws-architecture-diagram.svg` in this repo for a visual diagram.
+
+The frontend calls the backend over REST (`/clients`, `/login`, `/projects`, etc.) and a WebSocket connection (`/ws/chat/{thread_id}`) for real-time messaging. The backend connects to RDS PostgreSQL via `DATABASE_URL`.
+
+## AWS Services Used & Why
+
+| Service | Purpose | Reasoning |
+|---|---|---|
+| **EC2** | Hosts both Docker containers | The app has a persistent WebSocket connection, which needs a server that stays running — this rules out serverless (Lambda). A single EC2 instance is the simplest correct fit for one app with two containers; ECS/EKS would be unnecessary complexity for this scale. `t3.small` was used instead of the Free Tier `t2/t3.micro` after the micro instance ran out of disk/memory headroom while building the frontend's Docker image. |
+| **Security Group** | Firewall rules on the EC2 instance | SSH (22) restricted, ports 3000 and 8000 opened for the app. |
+| **VPC** | Default AWS networking | Used automatically with EC2 and RDS; no custom VPC needed for this scope. |
+| **RDS (PostgreSQL)** | Managed database | db.t4g.micro, Single-AZ, 20GB — Free Tier eligible. Chosen over self-hosting Postgres in a container so backups, patching, and availability are handled by AWS rather than manually. RDS's built-in "Set up EC2 connection" feature was used to automatically configure Security Group rules so only the application EC2 instance can reach the database. |
+| **EBS** | EC2's attached disk | Resized from the default 8GB to 20GB — the default size was insufficient to build the frontend's Docker image (Next.js's build output and `node_modules` require significant temporary disk space during the image build step). |
+| **Elastic IP** | Static public IP | Attached to the EC2 instance so the deployed URL stays constant across instance restarts (a plain EC2 public IP changes on restart otherwise). |
+| **CloudWatch** | Monitoring | Automatic basic metrics (CPU, network) for both EC2 and RDS, included at no extra cost. |
+
+**File storage:** Uploaded files are currently stored on the EC2 instance's local disk (`static/uploads/`). Moving this to S3 would be a natural next improvement for durability across instance restarts, but was out of scope given the assignment timeline.
+
+## Running Locally
 
 ### Prerequisites
+- Python 3.10+
+- Node.js 20+
+- Docker Desktop (for the containerized approach)
+- A PostgreSQL database (e.g. a free RDS or Neon instance)
 
-- Node.js 18+
-- Python 3.13+
-- PostgreSQL database (Neon recommended)
-- GitHub account
-- OpenAI API key
-- Google Gemini API key (for OCR)
+### Option A: Docker Compose (recommended)
 
-### Backend Deployment
+1. Clone the repository
+2. Create a `.env` file in the project root:
 
-#### Option 1: Railway (Recommended)
+   `DATABASE_URL=postgresql://<user>:<password>@<host>/<db>`
 
-1. Create a Railway account at [railway.app](https://railway.app)
-2. Connect your GitHub repository
-3. Add environment variables:
-   - `DATABASE_URL`: Your PostgreSQL connection string
-   - `OPENAI_API_KEY`: Your OpenAI API key
-   - `GEMINI_API_KEY`: Your Google Gemini API key
-   - `SECRET_KEY`: A random secret key for JWT
-   - `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`: Email settings
-4. Railway will automatically detect the `railway.json` and deploy
+3. Run: `docker compose up --build`
+4. Frontend: http://localhost:3000
+   Backend docs: http://localhost:8000/docs
 
-#### Option 2: Heroku
+### Option B: Run directly (no Docker)
 
-1. Create a Heroku account
-2. Install Heroku CLI
-3. Create a new app: `heroku create your-app-name`
-4. Add PostgreSQL addon: `heroku addons:create heroku-postgresql:hobby-dev`
-5. Set environment variables: `heroku config:set KEY=VALUE`
-6. Deploy: `git push heroku main`
-
-#### Option 3: Manual Server
-
-1. Set up a server with Python 3.13+
-2. Install dependencies: `pip install -r requirements.txt`
-3. Set environment variables
-4. Run with: `uvicorn main:app --host 0.0.0.0 --port 8000`
-
-### Frontend Deployment
-
-#### Option 1: Vercel (Recommended for Next.js)
-
-1. Create a Vercel account at [vercel.com](https://vercel.com)
-2. Connect your GitHub repository
-3. Set the root directory to `frontend`
-4. Add environment variables:
-   - `wat `: Your backend API URL
-5. Deploy automatically
-
-#### Option 2: Netlify
-
-1. Create a Netlify account
-2. Connect GitHub repo
-3. Set build command: `npm run build`
-4. Set publish directory: `frontend/out` (for static export) or `frontend/.next` (for SSR)
-5. Add environment variables
-
-### Database Setup
-
-1. Create a Neon PostgreSQL database at [neon.tech](https://neon.tech)
-2. Run the database migrations: `python create_tables.py`
-3. Seed initial data: `python seed_db.py`
-
-### Environment Variables
-
-Create a `.env` file in the root directory:
-
+**Backend:**
 ```
-DATABASE_URL=postgresql://user:password@host:port/database
-OPENAI_API_KEY=your_openai_key
-GEMINI_API_KEY=your_gemini_key
-SECRET_KEY=your_secret_key
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your_email@gmail.com
-SMTP_PASSWORD=your_app_password
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000  # local development
-
-# In Vercel set Environment Variable (Production):
-# NEXT_PUBLIC_API_BASE_URL=https://web-production-30b6.up.railway.app
+python -m venv venv
+venv\Scripts\Activate      # Windows
+pip install -r requirements.txt
+python -m uvicorn main:app --reload
 ```
 
-## Local Development
+**Frontend** (separate terminal):
+```
+cd frontend
+npm install
+npm run dev
+```
 
-### Backend
+### Seeding an admin user
 
-1. Create virtual environment: `python -m venv .venv`
-2. Activate: `source .venv/bin/activate`
-3. Install dependencies: `pip install -r requirements.txt`
-4. Run migrations: `python create_tables.py`
-5. Start server: `uvicorn main:app --reload`
+The database starts empty. Create a default admin login with:
+```
+python seed_db.py
+```
+This creates `admin@example.com` / `password123`.
 
-### Frontend
+## Deployment Steps (AWS)
 
-1. Navigate to frontend: `cd frontend`
-2. Install dependencies: `npm install`
-3. Start dev server: `npm run dev`
+1. Launched an EC2 instance (Ubuntu 22.04, t3.small)
+2. Configured Security Group to allow SSH (22, restricted), and ports 3000 / 8000
+3. Installed Docker, Docker Compose, and Git on the instance
+4. Cloned the source code directly from GitHub onto the instance
+5. Created an RDS PostgreSQL database (db.t4g.micro, Free Tier), using its "Set up EC2 connection" feature to automatically configure Security Group access
+6. Resized the EC2 instance's EBS volume from 8GB to 20GB to accommodate the frontend's Docker build
+7. Set `DATABASE_URL` in a `.env` file on the instance, pointing to RDS
+8. Set `NEXT_PUBLIC_API_BASE_URL` (frontend build arg, in `docker-compose.yml`) to the EC2 instance's Elastic IP
+9. Ran `docker compose up -d --build` to build and start both containers in detached mode
+10. Seeded an admin user and verified the app by logging in from a browser outside the EC2 instance
 
-## How to Add New Features
+## Deployment / Configuration Files
 
-### Backend (FastAPI)
+- `Dockerfile` — backend image (Python 3.10-slim, FastAPI/Uvicorn)
+- `frontend/Dockerfile` — frontend image (Node 20-alpine, Next.js build + start)
+- `docker-compose.yml` — orchestrates both containers together
+- `aws-architecture-diagram.svg` — visual architecture diagram
 
-1. **Add Database Models**: 
-   - Edit `database.py` to add new SQLModel classes
-   - Run `python create_tables.py` to create tables
+## Environment Variables
 
-2. **Create API Endpoints**:
-   - Add routes in `main.py` or create new modules
-   - Follow RESTful conventions
-   - Add proper authentication/authorization
+| Variable | Required | Purpose |
+|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `OPENAI_API_KEY` | No | Enables AI features. App runs without it; those features degrade gracefully. |
+| `SENDER_EMAIL` / `SENDER_PASSWORD` | No | Outlook SMTP credentials for email notifications. Not configured in this deployment. |
+| `NEXT_PUBLIC_API_BASE_URL` | Yes (frontend build) | The backend's public URL, baked into the frontend at build time. |
 
-3. **Add Business Logic**:
-   - Create functions in appropriate modules under `modules/`
-   - Use dependency injection for database sessions
+**No credentials, API keys, or passwords are committed to this repository.** `.env` and other sensitive/generated files are excluded via `.gitignore`.
 
-4. **Update Dependencies**:
-   - Add to `requirements.txt`
-   - Test with `pip install -r requirements.txt`
+## Known Limitations / Future Improvements
 
-### Frontend (Next.js)
-
-1. **Create New Pages**:
-   - Add to `frontend/src/app/` following the routing structure
-   - Use TypeScript for type safety
-
-2. **Add Components**:
-   - Create reusable components in `frontend/src/components/`
-   - Follow existing patterns for consistency
-
-3. **API Integration**:
-   - Use the existing API utilities in `frontend/src/lib/`
-   - Add new API calls as needed
-
-4. **Styling**:
-   - Use Tailwind CSS classes
-   - Follow the design system
-
-### General Steps
-
-1. Plan the feature and database changes
-2. Implement backend API endpoints
-3. Update frontend to consume the new APIs
-4. Add proper error handling and validation
-5. Test thoroughly
-6. Update documentation
-
-### Example: Adding a New Entity
-
-1. Define the model in `database.py`
-2. Create CRUD endpoints in `main.py`
-3. Create frontend pages for list/view/edit
-4. Add navigation links
-5. Test the full flow
-
-## API Documentation
-
-The API documentation is available at `/docs` when the backend is running (Swagger UI) and `/redoc` for ReDoc.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## License
-
-This project is proprietary. All rights reserved.
+- Uploaded files are stored on local disk rather than S3 — would require changing the upload logic in `main.py`.
+- No HTTPS/custom domain configured — the app is served over plain HTTP on the instance's public IP.
+- RDS is currently publicly accessible (restricted to the EC2 instance's Security Group). A stricter setup would use a private subnet.
+- Email notification feature is not configured, since it requires a dedicated email account's credentials.
